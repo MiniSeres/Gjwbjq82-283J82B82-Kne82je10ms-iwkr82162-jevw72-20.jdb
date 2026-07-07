@@ -160,6 +160,319 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0a0f;color:#e0e0e0;display:
             <button onclick="createBot()"><i class="fas fa-plus"></i> Create</button>
         </div>
     </div>
-    <script src="script.js"></script>
+    <script>
+const API_BASE = 'https://jvjvjvjvjweijrbdisidhjejf77u6y5eu7y5u89p0-fdwm.onrender.com';
+
+let currentToken = localStorage.getItem('token') || '';
+let currentUser = localStorage.getItem('username') || '';
+let botChart = null;
+let botsData = {};
+
+// ===== AUTH =====
+async function handleRegister() {
+    const username = document.getElementById('loginUser').value.trim();
+    const password = document.getElementById('loginPass').value.trim();
+    const msg = document.getElementById('authMessage');
+    
+    if (!username || !password) {
+        msg.textContent = '⚠️ Nhập đầy đủ thông tin!';
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (data.success) {
+            msg.style.color = '#00ff88';
+            msg.textContent = '✅ Đăng ký thành công! Hãy đăng nhập.';
+            document.getElementById('loginUser').value = '';
+            document.getElementById('loginPass').value = '';
+        } else {
+            msg.style.color = '#ff6b6b';
+            msg.textContent = '❌ ' + data.error;
+        }
+    } catch(e) {
+        msg.style.color = '#ff6b6b';
+        msg.textContent = '❌ Lỗi kết nối server!';
+    }
+}
+
+async function handleLogin() {
+    const username = document.getElementById('loginUser').value.trim();
+    const password = document.getElementById('loginPass').value.trim();
+    const msg = document.getElementById('authMessage');
+    
+    if (!username || !password) {
+        msg.textContent = '⚠️ Nhập đầy đủ thông tin!';
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/api/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (data.success) {
+            currentToken = data.token;
+            currentUser = data.username;
+            localStorage.setItem('token', currentToken);
+            localStorage.setItem('username', currentUser);
+            document.getElementById('loginModal').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'flex';
+            document.getElementById('currentUser').textContent = currentUser;
+            refreshData();
+        } else {
+            msg.style.color = '#ff6b6b';
+            msg.textContent = '❌ ' + data.error;
+        }
+    } catch(e) {
+        msg.style.color = '#ff6b6b';
+        msg.textContent = '❌ Lỗi kết nối server!';
+    }
+}
+
+function logout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    currentToken = '';
+    currentUser = '';
+    document.getElementById('loginModal').style.display = 'block';
+    document.getElementById('mainApp').style.display = 'none';
+}
+
+// ===== API REQUEST =====
+async function apiRequest(endpoint, options = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (currentToken) headers['X-Token'] = currentToken;
+    const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+    if (res.status === 401) {
+        logout();
+        return null;
+    }
+    return res;
+}
+
+// ===== BOT MANAGEMENT =====
+async function fetchStats() {
+    try {
+        const res = await fetch(`${API_BASE}/api/stats`);
+        const stats = await res.json();
+        return stats;
+    } catch(e) { console.error(e); }
+}
+
+async function fetchBots() {
+    try {
+        const res = await apiRequest('/api/bots');
+        if (!res) return;
+        const bots = await res.json();
+        botsData = bots;
+        renderBots(bots);
+        updateEditorSelect(bots);
+        updateChart(bots);
+        document.getElementById('totalBots').textContent = Object.keys(bots).length;
+        document.getElementById('statBots').textContent = Object.keys(bots).length;
+        const online = Object.values(bots).filter(b => b.status === 'on').length;
+        document.getElementById('onlineBots').textContent = online;
+        document.getElementById('statOnline').textContent = online;
+        document.getElementById('statUpdate').textContent = new Date().toLocaleTimeString();
+        return bots;
+    } catch(e) { console.error(e); }
+}
+
+function renderBots(bots) {
+    const container = document.getElementById('botList');
+    const search = document.getElementById('botSearch').value.toLowerCase();
+    let html = '';
+    for (const [name, bot] of Object.entries(bots)) {
+        if (!name.toLowerCase().includes(search)) continue;
+        const status = bot.status === 'on' ? 'on' : 'off';
+        const statusText = bot.status === 'on' ? '🟢 Online' : '🔴 Offline';
+        const token = bot.token || 'No token';
+        const displayToken = token.length > 20 ? token.slice(0,10)+'...'+token.slice(-5) : token;
+        html += `
+            <div class="bot-card ${bot.status === 'on' ? 'online' : 'offline'}">
+                <div class="name"><span>🤖 ${name}</span><span class="status ${status}">${statusText}</span></div>
+                <div style="margin:6px 0;font-size:13px;color:#888;">@${bot.username}</div>
+                <div style="font-size:12px;color:#666;word-break:break-all;">🔑 ${displayToken}</div>
+                <div style="font-size:12px;color:#666;margin:2px 0;">📝 ${bot.language || 'python'}</div>
+                <div class="actions">
+                    <button onclick="toggleBot('${name}')"><i class="fas fa-power-off"></i></button>
+                    <button onclick="editBotCode('${name}')"><i class="fas fa-code"></i></button>
+                    <button onclick="setToken('${name}')"><i class="fas fa-key"></i></button>
+                    <button class="danger" onclick="deleteBot('${name}')"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>`;
+    }
+    container.innerHTML = html || '<div style="text-align:center;padding:40px;color:#666;">No bots</div>';
+}
+
+function updateEditorSelect(bots) {
+    const sel = document.getElementById('editorBotSelect');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">Select Bot</option>';
+    for (const name of Object.keys(bots)) {
+        sel.innerHTML += `<option value="${name}">${name}</option>`;
+    }
+    if (current) sel.value = current;
+}
+
+function updateChart(bots) {
+    const ctx = document.getElementById('botChart')?.getContext('2d');
+    if (!ctx) return;
+    const data = { on: 0, off: 0 };
+    for (const bot of Object.values(bots)) {
+        if (bot.status === 'on') data.on++;
+        else data.off++;
+    }
+    if (botChart) botChart.destroy();
+    botChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: { labels: ['Online', 'Offline'], datasets: [{ data: [data.on, data.off], backgroundColor: ['#00ff88', '#ff4444'] }] },
+        options: { responsive: true, plugins: { legend: { labels: { color: '#e0e0e0' } } } }
+    });
+}
+
+async function toggleBot(name) {
+    if (!confirm(`Toggle ${name}?`)) return;
+    await apiRequest(`/api/bots/${name}`, { method: 'POST', body: JSON.stringify({ action: 'toggle' }) });
+    refreshData();
+}
+
+async function deleteBot(name) {
+    if (!confirm(`Delete ${name}?`)) return;
+    await apiRequest(`/api/bots/${name}`, { method: 'POST', body: JSON.stringify({ action: 'delete' }) });
+    refreshData();
+}
+
+async function setToken(name) {
+    const token = prompt('Enter bot token:', '');
+    if (token === null) return;
+    await apiRequest(`/api/token/${name}`, { method: 'POST', body: JSON.stringify({ token }) });
+    refreshData();
+}
+
+function showCreateBot() {
+    document.getElementById('createBotModal').style.display = 'block';
+}
+
+function closeModal() {
+    document.getElementById('createBotModal').style.display = 'none';
+}
+
+async function createBot() {
+    const name = document.getElementById('newBotName').value.trim();
+    const username = document.getElementById('newBotUsername').value.trim() || `${name}_bot`;
+    const token = document.getElementById('newBotToken').value.trim();
+    const language = document.getElementById('newBotLanguage').value;
+    if (!name) return alert('Enter bot name');
+    await apiRequest('/api/bots', { method: 'POST', body: JSON.stringify({ name, username, token, language }) });
+    closeModal();
+    refreshData();
+}
+
+async function loadCode() {
+    const name = document.getElementById('editorBotSelect').value;
+    if (!name) return alert('Select bot');
+    const res = await apiRequest(`/api/code/${name}`);
+    if (!res) return;
+    const data = await res.json();
+    document.getElementById('codeEditor').value = data.code || '';
+    document.getElementById('editorLanguage').value = data.language || 'python';
+    document.getElementById('editorToken').value = data.token || '';
+    highlightCode();
+}
+
+async function saveCode() {
+    const name = document.getElementById('editorBotSelect').value;
+    if (!name) return alert('Select bot');
+    const code = document.getElementById('codeEditor').value;
+    const language = document.getElementById('editorLanguage').value;
+    const token = document.getElementById('editorToken').value;
+    await apiRequest(`/api/code/${name}`, { method: 'POST', body: JSON.stringify({ code, language, token }) });
+    alert('Saved!');
+    refreshData();
+}
+
+async function runCode() {
+    const name = document.getElementById('editorBotSelect').value;
+    if (!name) return alert('Select bot');
+    const output = document.getElementById('codeOutput');
+    output.innerHTML = '⏳ Running...';
+    try {
+        const res = await apiRequest(`/api/run/${name}`, { method: 'POST' });
+        if (!res) return;
+        const data = await res.json();
+        if (data.error) {
+            output.innerHTML = `<span style="color:#ff4444;">❌ ${data.error}</span>`;
+        } else {
+            output.innerHTML = `<span style="color:#00ff88;">✅ Output:</span>\n${data.output || 'No output'}`;
+        }
+    } catch(e) {
+        output.innerHTML = `<span style="color:#ff4444;">❌ ${e.message}</span>`;
+    }
+}
+
+function editBotCode(name) {
+    document.querySelector('[data-tab="editor"]').click();
+    document.getElementById('editorBotSelect').value = name;
+    setTimeout(loadCode, 100);
+}
+
+function highlightCode() {
+    const preview = document.getElementById('codePreview');
+    const code = document.getElementById('codeEditor').value;
+    const lang = document.getElementById('editorLanguage').value;
+    const map = { python:'python', javascript:'javascript', ruby:'ruby', cpp:'cpp' };
+    preview.innerHTML = `<pre><code class="language-${map[lang] || 'plaintext'}">${code}</code></pre>`;
+    hljs.highlightAll();
+}
+
+async function refreshData() {
+    await fetchBots();
+}
+
+// ===== UI EVENTS =====
+document.querySelectorAll('.menu-item').forEach(item => {
+    item.addEventListener('click', function() {
+        document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active'));
+        this.classList.add('active');
+        const tab = this.dataset.tab;
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.getElementById(`tab-${tab}`).classList.add('active');
+        document.getElementById('pageTitle').textContent = {
+            dashboard: '📊 Dashboard',
+            bots: '🤖 Bot Manager',
+            editor: '💻 Code Editor'
+        }[tab] || '📊 Dashboard';
+        if (tab === 'editor') highlightCode();
+    });
+});
+
+document.getElementById('botSearch')?.addEventListener('input', fetchBots);
+document.getElementById('codeEditor')?.addEventListener('input', highlightCode);
+document.getElementById('editorLanguage')?.addEventListener('change', highlightCode);
+document.querySelector('.close')?.addEventListener('click', closeModal);
+window.onclick = function(event) { if (event.target.classList.contains('modal')) closeModal(); };
+
+// ===== CHECK SESSION =====
+if (currentToken && currentUser) {
+    document.getElementById('loginModal').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'flex';
+    document.getElementById('currentUser').textContent = currentUser;
+    refreshData();
+} else {
+    document.getElementById('loginModal').style.display = 'block';
+    document.getElementById('mainApp').style.display = 'none';
+}
+
+setInterval(refreshData, 15000);
+    </script>
 </body>
                                                                                                 </html>
